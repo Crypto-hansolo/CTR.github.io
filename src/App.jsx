@@ -9,7 +9,6 @@ const MOCK_VAULT = [
 ];
 
 const MOCK_CTR = {
-  price: 0.00418,
   marketCap: 2_190_000,
   totalSupply: 1_000_000_000,
   circulatingSupply: 524_000_000,
@@ -34,6 +33,7 @@ const generateBuybackEvents = () => {
 
 const fmt = (n, dec = 2) => n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 const fmtCompact = (n) => n >= 1e6 ? `${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}K` : n.toFixed(0);
+const fmtPrice = (p) => p < 0.001 ? p.toFixed(7) : p < 0.01 ? p.toFixed(6) : p < 1 ? p.toFixed(5) : p.toFixed(2);
 const truncHash = (h) => `${h.slice(0,6)}…${h.slice(-4)}`;
 const timeAgo = (ts) => {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -90,30 +90,32 @@ function useCounter(target, duration = 1200) {
 export default function CTRDashboard() {
   const [events, setEvents] = useState(() => generateBuybackEvents());
   const [newIds, setNewIds] = useState(new Set());
-  const [livePrice, setLivePrice] = useState(MOCK_CTR.price);
-  const [priceChange, setPriceChange] = useState(null);
+  const [livePrice, setLivePrice] = useState(null);
+  const [priceChange24h, setPriceChange24h] = useState(null);
   const vaultData = MOCK_VAULT;
   const ctr = MOCK_CTR;
   const vaultTotal = vaultData.reduce((s, t) => s + t.amount * t.price, 0);
   const animVault = useCounter(vaultTotal);
   const burnPct = (ctr.totalBurned / ctr.totalSupply) * 100;
+  const pieData = vaultData.map(t => ({ symbol: t.symbol, value: t.amount * t.price, color: t.color }));
+
   useEffect(() => {
     const fetchPrice = async () => {
       try {
-        const res = await fetch("https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb");
+        const res = await fetch(
+          "https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb"
+        );
         const data = await res.json();
         const price = parseFloat(data.pair?.priceUsd);
         const change = parseFloat(data.pair?.priceChange?.h24);
         if (!isNaN(price)) setLivePrice(price);
-        if (!isNaN(change)) setPriceChange(change);
+        if (!isNaN(change)) setPriceChange24h(change);
       } catch (e) {}
     };
     fetchPrice();
-    const pi = setInterval(fetchPrice, 30000);
-    return () => clearInterval(pi);
+    const priceInterval = setInterval(fetchPrice, 30000);
+    return () => clearInterval(priceInterval);
   }, []);
-
-  const pieData = vaultData.map(t => ({ symbol: t.symbol, value: t.amount * t.price, color: t.color }));
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -131,6 +133,10 @@ export default function CTRDashboard() {
     }, 25000);
     return () => clearInterval(interval);
   }, []);
+
+  const displayChange = priceChange24h !== null ? priceChange24h : 0;
+  const changeColor = displayChange >= 0 ? "#64ffda" : "#ff6b6b";
+  const changePrefix = displayChange >= 0 ? "+" : "";
 
   return (
     <div style={{ minHeight: "100vh", background: "#050812", color: "#e2e8f0", fontFamily: "system-ui, sans-serif" }}>
@@ -158,7 +164,6 @@ export default function CTRDashboard() {
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
       `}</style>
 
-      {/* Header */}
       <header style={{ borderBottom: "1px solid #1e293b", background: "#0a0e1a", padding: "0 16px", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -173,7 +178,16 @@ export default function CTRDashboard() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="#e2e8f0"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.741l7.73-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
               <span style={{ fontSize: 10, color: "#e2e8f0", fontFamily: "'DM Mono',monospace", letterSpacing: ".08em" }}>@CronosTreasury</span>
             </a>
-            <span style={{ fontSize: 12, color: "#64ffda", fontFamily: "'DM Mono',monospace", whiteSpace: "nowrap" }}>${livePrice < 0.01 ? livePrice.toFixed(6) : fmt(livePrice, 5)}</span>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 13, color: "#64ffda", fontFamily: "'DM Mono',monospace", fontWeight: 600 }}>
+                {livePrice !== null ? `$${fmtPrice(livePrice)}` : "Loading..."}
+              </div>
+              {priceChange24h !== null && (
+                <div style={{ fontSize: 10, color: changeColor, fontFamily: "'DM Mono',monospace" }}>
+                  {changePrefix}{displayChange.toFixed(2)}% (24h)
+                </div>
+              )}
+            </div>
             <div style={{ display: "flex", alignItems: "center", gap: 5, background: "#0f172a", border: "1px solid #1e293b", borderRadius: 99, padding: "4px 10px" }}>
               <span className="live-dot" style={{ width: 6, height: 6, background: "#64ffda", borderRadius: "50%", display: "inline-block" }} />
               <span style={{ fontSize: 10, color: "#64ffda", fontFamily: "'DM Mono',monospace", letterSpacing: ".08em" }}>LIVE</span>
@@ -183,15 +197,13 @@ export default function CTRDashboard() {
       </header>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
-
-        {/* Stats */}
         <div className="stats-grid">
           {[
-            { label: "CTR Price", value: `$${livePrice < 0.01 ? livePrice.toFixed(6) : fmt(livePrice, 5)}`, sub: "${priceChange !== null ? (priceChange > 0 ? "+" : "") + priceChange.toFixed(2) + "% (24h)" : "+4.2% (24h)"}", c: "#64ffda" },
+            { label: "CTR Price", value: livePrice !== null ? `$${fmtPrice(livePrice)}` : "...", sub: priceChange24h !== null ? `${changePrefix}${displayChange.toFixed(2)}% (24h)` : "Loading...", c: changeColor },
             { label: "Market Cap", value: `$${fmtCompact(ctr.marketCap)}`, sub: "FDV: $4.18M", c: "#7c3aed" },
             { label: "Circulating", value: fmtCompact(ctr.circulatingSupply), sub: `of ${fmtCompact(ctr.totalSupply)}`, c: "#f59e0b" },
             { label: "Total Burned", value: fmtCompact(ctr.totalBurned), sub: `${burnPct.toFixed(2)}% of supply`, c: "#ff6b6b" },
-            { label: "Vault TVL", value: `$${fmtCompact(animVault)}`, sub: "↑ 2.1% this week", c: "#64ffda" },
+            { label: "Vault TVL", value: `$${fmtCompact(animVault)}`, sub: "2.1% this week", c: "#64ffda" },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div style={{ fontSize: 10, color: "#64748b", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 6 }}>{s.label}</div>
@@ -201,9 +213,7 @@ export default function CTRDashboard() {
           ))}
         </div>
 
-        {/* Vault + Burn */}
         <div className="grid-2">
-          {/* Vault Composition */}
           <div className="section-card">
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
@@ -231,7 +241,6 @@ export default function CTRDashboard() {
             </div>
           </div>
 
-          {/* Burn Analytics */}
           <div className="section-card">
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b" }}>
               <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>Burn Analytics</div>
@@ -251,7 +260,7 @@ export default function CTRDashboard() {
                   { label: "Total Burned", val: fmtCompact(ctr.totalBurned) + " CTR", c: "#ff6b6b" },
                   { label: "Remaining", val: fmtCompact(ctr.circulatingSupply - ctr.totalBurned) + " CTR", c: "#64ffda" },
                   { label: "Burn Rate (7d)", val: "~2.1M CTR/week", c: "#f59e0b" },
-                  { label: "Est. Deflation", val: "−4.8% /month", c: "#7c3aed" },
+                  { label: "Est. Deflation", val: "-4.8% /month", c: "#7c3aed" },
                 ].map(s => (
                   <div key={s.label} style={{ background: "#111827", borderRadius: 10, padding: "10px 14px" }}>
                     <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{s.label}</div>
@@ -263,7 +272,6 @@ export default function CTRDashboard() {
           </div>
         </div>
 
-        {/* Holdings Table */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>Treasury Holdings</div>
@@ -273,12 +281,7 @@ export default function CTRDashboard() {
             <table className="holdings-table">
               <thead>
                 <tr>
-                  <th>Asset</th>
-                  <th>Balance</th>
-                  <th>Price</th>
-                  <th>USD Value</th>
-                  <th>Allocation</th>
-                  <th>24h</th>
+                  <th>Asset</th><th>Balance</th><th>Price</th><th>USD Value</th><th>Allocation</th><th>24h</th>
                 </tr>
               </thead>
               <tbody>
@@ -309,7 +312,7 @@ export default function CTRDashboard() {
                         </div>
                       </td>
                       <td style={{ fontFamily: "'DM Mono',monospace", color: +change > 0 ? "#64ffda" : "#ff6b6b", fontSize: 12 }}>
-                        {+change > 0 ? "▲" : "▼"} {Math.abs(change)}%
+                        {+change > 0 ? "+" : ""}{change}%
                       </td>
                     </tr>
                   );
@@ -319,7 +322,6 @@ export default function CTRDashboard() {
           </div>
         </div>
 
-        {/* Buyback Feed */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -355,7 +357,6 @@ export default function CTRDashboard() {
           </div>
         </div>
 
-        {/* How It Works */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b" }}>
             <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>How CTR Works</div>
@@ -378,11 +379,12 @@ export default function CTRDashboard() {
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{ textAlign: "center", padding: "16px 0", borderTop: "1px solid #1e293b" }}>
           <div style={{ fontSize: 11, color: "#334155", fontFamily: "'DM Mono',monospace" }}>
             CTR · Cronos Treasury Reserve ·{" "}
             <a href="https://explorer.cronos.org" target="_blank" rel="noopener noreferrer" style={{ color: "#475569", textDecoration: "none" }}>Cronos Explorer ↗</a>
+            {" · "}
+            <a href="https://dexscreener.com/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb" target="_blank" rel="noopener noreferrer" style={{ color: "#475569", textDecoration: "none" }}>DexScreener ↗</a>
           </div>
         </div>
       </div>
