@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 
-const MOCK_VAULT = [
-  { symbol: "BTC",  name: "Bitcoin",    amount: 1.42,   price: 83200,  color: "#F7931A" },
-  { symbol: "ETH",  name: "Ethereum",   amount: 14.7,   price: 2180,   color: "#627EEA" },
-  { symbol: "LCRO", name: "Liquid CRO", amount: 88400,  price: 0.094,  color: "#4A90D9" },
-  { symbol: "USDC", name: "USD Coin",   amount: 24800,  price: 1.0,    color: "#2775CA" },
-  { symbol: "PACK", name: "Pack Token", amount: 312000, price: 0.0072, color: "#E94040" },
+const WALLET = "0x96a6cd06338efe754f200aba9ff07788c16e5f20";
+const CRONOS_RPC = "https://evm.cronos.org";
+
+const TOKENS = [
+  { symbol: "CDCBTC", name: "CDC Bitcoin",  address: "0x2e53c5586e12a99d4CAE366E9Fc5C14fE9c6495d", decimals: 8,  color: "#F7931A", coingecko: "bitcoin" },
+  { symbol: "CDCETH", name: "CDC Ethereum", address: "0x7a7c9db510aB29A2FC362a4c34260BEcB5cE3446", decimals: 18, color: "#627EEA", coingecko: "ethereum" },
+  { symbol: "LCRO",   name: "Liquid CRO",  address: "0x9Fae23A2700FEeCd5b93e43fDBc03c76AA7C08A6", decimals: 18, color: "#4A90D9", coingecko: "liquid-cro" },
+  { symbol: "USDC",   name: "USD Coin",    address: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59", decimals: 6,  color: "#2775CA", coingecko: "usd-coin" },
+  { symbol: "PACK",   name: "Pack Token",  address: "0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804", decimals: 18, color: "#E94040", coingecko: null },
+  { symbol: "CTR",    name: "CTR Token",   address: "0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC", decimals: 18, color: "#64ffda", coingecko: null },
 ];
 
 const MOCK_CTR = {
-  marketCap: 0,
   totalSupply: 1_000_000_000,
-  circulatingSupply: 1_000_000_000,
   totalBurned: 0,
 };
 
@@ -43,8 +45,22 @@ const timeAgo = (ts) => {
   return `${Math.floor(s/86400)}d ago`;
 };
 
+// ERC20 balanceOf via eth_call
+async function getTokenBalance(tokenAddress, walletAddress, decimals) {
+  const data = "0x70a08231" + walletAddress.slice(2).padStart(64, "0");
+  const res = await fetch(CRONOS_RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_call", params: [{ to: tokenAddress, data }, "latest"], id: 1 }),
+  });
+  const json = await res.json();
+  const raw = BigInt(json.result || "0x0");
+  return Number(raw) / Math.pow(10, decimals);
+}
+
 function PieChart({ data }) {
   const total = data.reduce((s, d) => s + d.value, 0);
+  if (total === 0) return null;
   let angle = -Math.PI / 2;
   const slices = data.map(d => {
     const sweep = (d.value / total) * 2 * Math.PI;
@@ -93,43 +109,97 @@ export default function CTRDashboard() {
   const [livePrice, setLivePrice] = useState(null);
   const [priceChange24h, setPriceChange24h] = useState(null);
   const [liveMarketCap, setLiveMarketCap] = useState(null);
-  const vaultData = MOCK_VAULT;
+  const [vaultTokens, setVaultTokens] = useState(TOKENS.map(t => ({ ...t, amount: 0, usdPrice: 0 })));
+  const [vaultLoading, setVaultLoading] = useState(true);
   const ctr = MOCK_CTR;
-  const vaultTotal = vaultData.reduce((s, t) => s + t.amount * t.price, 0);
-  const animVault = useCounter(vaultTotal);
-  const burnPct = 0;
-  const pieData = vaultData.map(t => ({ symbol: t.symbol, value: t.amount * t.price, color: t.color }));
 
+  const vaultTotal = vaultTokens.reduce((s, t) => s + t.amount * t.usdPrice, 0);
+  const animVault = useCounter(vaultTotal);
+  const pieData = vaultTokens.filter(t => t.amount * t.usdPrice > 0).map(t => ({ symbol: t.symbol, value: t.amount * t.usdPrice, color: t.color }));
+
+  // Fetch CTR price from DexScreener
   useEffect(() => {
     const fetchPrice = async () => {
       try {
-        const res = await fetch(
-          "https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb"
-        );
+        const res = await fetch("https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb");
         const data = await res.json();
         const price = parseFloat(data.pair?.priceUsd);
         const change = parseFloat(data.pair?.priceChange?.h24);
         const fdv = parseFloat(data.pair?.fdv);
-        const mcap = parseFloat(data.pair?.marketCap);
         if (!isNaN(price)) setLivePrice(price);
         if (!isNaN(change)) setPriceChange24h(change);
-        if (!isNaN(mcap) && mcap > 0) setLiveMarketCap(mcap);
-        else if (!isNaN(fdv) && fdv > 0) setLiveMarketCap(fdv);
+        if (!isNaN(fdv) && fdv > 0) setLiveMarketCap(fdv);
       } catch (e) {}
     };
     fetchPrice();
-    const priceInterval = setInterval(fetchPrice, 30000);
-    return () => clearInterval(priceInterval);
+    const interval = setInterval(fetchPrice, 30000);
+    return () => clearInterval(interval);
   }, []);
 
+  // Fetch wallet balances + prices
+  useEffect(() => {
+    const fetchVault = async () => {
+      try {
+        // Get all token balances via RPC
+        const balances = await Promise.all(
+          TOKENS.map(t => getTokenBalance(t.address, WALLET, t.decimals))
+        );
+
+        // Get prices from CoinGecko for known tokens
+        const cgIds = TOKENS.map(t => t.coingecko).filter(Boolean).join(",");
+        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`);
+        const cgData = await cgRes.json();
+
+        // Get PACK price from DexScreener
+        let packPrice = 0;
+        try {
+          const packRes = await fetch("https://api.dexscreener.com/latest/dex/tokens/0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804");
+          const packData = await packRes.json();
+          packPrice = parseFloat(packData.pairs?.[0]?.priceUsd) || 0;
+        } catch (e) {}
+
+        // Get CTR price (already have it from livePrice state, use fallback)
+        let ctrPrice = 0;
+        try {
+          const ctrRes = await fetch("https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb");
+          const ctrData = await ctrRes.json();
+          ctrPrice = parseFloat(ctrData.pair?.priceUsd) || 0;
+        } catch (e) {}
+
+        const updated = TOKENS.map((t, i) => {
+          let usdPrice = 0;
+          if (t.coingecko && cgData[t.coingecko]) {
+            usdPrice = cgData[t.coingecko].usd;
+          } else if (t.symbol === "PACK") {
+            usdPrice = packPrice;
+          } else if (t.symbol === "CTR") {
+            usdPrice = ctrPrice;
+          } else if (t.symbol === "USDC") {
+            usdPrice = 1.0;
+          }
+          return { ...t, amount: balances[i], usdPrice };
+        });
+
+        setVaultTokens(updated);
+        setVaultLoading(false);
+      } catch (e) {
+        console.log("Vault fetch error:", e);
+        setVaultLoading(false);
+      }
+    };
+
+    fetchVault();
+    const interval = setInterval(fetchVault, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Simulated buyback events
   useEffect(() => {
     const interval = setInterval(() => {
       const bought = Math.floor(Math.random() * 900_000 + 100_000);
       const burned = Math.floor(bought * 0.9);
       const newEvent = {
-        id: Date.now(),
-        ts: new Date(),
-        bought, burned,
+        id: Date.now(), ts: new Date(), bought, burned,
         txHash: "0x" + [...Array(64)].map(() => Math.floor(Math.random()*16).toString(16)).join(""),
       };
       setEvents(prev => [newEvent, ...prev.slice(0, 19)]);
@@ -151,8 +221,10 @@ export default function CTRDashboard() {
         body { overflow-x: hidden; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
         @keyframes slideIn { from{transform:translateY(-8px);opacity:0} to{transform:translateY(0);opacity:1} }
+        @keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
         .live-dot { animation: pulse 2s infinite; }
         .new-row { animation: slideIn .4s ease; }
+        .spinner { animation: spin 1s linear infinite; }
         .stat-card { background: linear-gradient(135deg,#0d1226,#111827); border: 1px solid #1e293b; border-radius: 12px; padding: 16px 20px; }
         .section-card { background: #0d1226; border: 1px solid #1e293b; border-radius: 16px; overflow: hidden; margin-bottom: 16px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -169,6 +241,7 @@ export default function CTRDashboard() {
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
       `}</style>
 
+      {/* Header */}
       <header style={{ borderBottom: "1px solid #1e293b", background: "#0a0e1a", padding: "0 16px", position: "sticky", top: 0, zIndex: 100 }}>
         <div style={{ maxWidth: 1100, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56, gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -202,13 +275,15 @@ export default function CTRDashboard() {
       </header>
 
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px" }}>
+
+        {/* Stats */}
         <div className="stats-grid">
           {[
             { label: "CTR Price", value: livePrice !== null ? `$${fmtPrice(livePrice)}` : "...", sub: priceChange24h !== null ? `${changePrefix}${displayChange.toFixed(2)}% (24h)` : "Loading...", c: changeColor },
-            { label: "Market Cap", value: `$${fmtCompact(ctr.marketCap)}`, sub: "FDV: $4.18M", c: "#7c3aed" },
-            { label: "Total Supply", value: fmtCompact(ctr.totalSupply), sub: "Fixed supply", c: "#f59e0b" },
+            { label: "Market Cap", value: liveMarketCap !== null ? `$${fmtCompact(liveMarketCap)}` : "...", sub: "Live · DexScreener", c: "#7c3aed" },
+            { label: "Total Supply", value: "1,000.00M", sub: "Fixed supply", c: "#f59e0b" },
             { label: "Total Burned", value: "0 CTR", sub: "Burn program starting soon", c: "#ff6b6b" },
-            { label: "Vault TVL", value: `$${fmtCompact(animVault)}`, sub: "2.1% this week", c: "#64ffda" },
+            { label: "Vault TVL", value: vaultLoading ? "Loading..." : `$${fmtCompact(animVault)}`, sub: "Live · Cronos RPC", c: "#64ffda" },
           ].map(s => (
             <div key={s.label} className="stat-card">
               <div style={{ fontSize: 10, color: "#64748b", letterSpacing: ".1em", textTransform: "uppercase", marginBottom: 6 }}>{s.label}</div>
@@ -218,31 +293,48 @@ export default function CTRDashboard() {
           ))}
         </div>
 
+        {/* Vault + Burn */}
         <div className="grid-2">
           <div className="section-card">
             <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>Vault Composition</div>
-                <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>Treasury assets</div>
+                <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
+                  <a href={`https://explorer.cronos.org/address/${WALLET}`} target="_blank" rel="noopener noreferrer" style={{ color: "#475569", textDecoration: "none" }}>
+                    {WALLET.slice(0,6)}…{WALLET.slice(-4)} ↗
+                  </a>
+                </div>
               </div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#64ffda", fontFamily: "'DM Mono',monospace" }}>${fmtCompact(vaultTotal)}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#64ffda", fontFamily: "'DM Mono',monospace" }}>
+                {vaultLoading ? "..." : `$${fmtCompact(vaultTotal)}`}
+              </div>
             </div>
             <div style={{ padding: 20 }}>
-              <PieChart data={pieData} />
-              <div style={{ marginTop: 16 }}>
-                {vaultData.map(t => {
-                  const val = t.amount * t.price;
-                  const pct = (val / vaultTotal * 100).toFixed(1);
-                  return (
-                    <div key={t.symbol} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
-                      <div style={{ flex: 1, fontSize: 13, color: "#cbd5e1" }}>{t.symbol}</div>
-                      <div style={{ fontSize: 12, color: "#64ffda", fontFamily: "'DM Mono',monospace" }}>${fmtCompact(val)}</div>
-                      <div style={{ fontSize: 11, color: "#475569", width: 36, textAlign: "right" }}>{pct}%</div>
-                    </div>
-                  );
-                })}
-              </div>
+              {vaultLoading ? (
+                <div style={{ textAlign: "center", padding: 40, color: "#475569", fontSize: 12 }}>
+                  <div style={{ width: 24, height: 24, border: "2px solid #1e293b", borderTop: "2px solid #64ffda", borderRadius: "50%", margin: "0 auto 12px", display: "inline-block" }} className="spinner" />
+                  <div>Loading wallet data...</div>
+                </div>
+              ) : (
+                <>
+                  <PieChart data={pieData} />
+                  <div style={{ marginTop: 16 }}>
+                    {vaultTokens.map(t => {
+                      const val = t.amount * t.usdPrice;
+                      const pct = vaultTotal > 0 ? (val / vaultTotal * 100).toFixed(1) : "0.0";
+                      return (
+                        <div key={t.symbol} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: t.color, flexShrink: 0 }} />
+                          <div style={{ flex: 1, fontSize: 13, color: "#cbd5e1" }}>{t.symbol}</div>
+                          <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'DM Mono',monospace" }}>{t.amount < 0.01 ? t.amount.toFixed(4) : fmtCompact(t.amount)}</div>
+                          <div style={{ fontSize: 12, color: "#64ffda", fontFamily: "'DM Mono',monospace", width: 70, textAlign: "right" }}>${fmtCompact(val)}</div>
+                          <div style={{ fontSize: 11, color: "#475569", width: 36, textAlign: "right" }}>{pct}%</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -253,9 +345,9 @@ export default function CTRDashboard() {
             </div>
             <div style={{ padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "center", marginBottom: 20 }}>
-                <div style={{ width: 140, height: 140, borderRadius: "50%", background: `conic-gradient(#ff6b6b 0deg, #ff9a3c ${burnPct * 3.6}deg, #1e293b ${burnPct * 3.6}deg)`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <div style={{ width: 140, height: 140, borderRadius: "50%", background: "conic-gradient(#ff6b6b 0deg, #1e293b 0deg)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <div style={{ width: 104, height: 104, borderRadius: "50%", background: "#0d1226", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                    <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Syne',sans-serif", color: "#ff6b6b" }}>{burnPct.toFixed(1)}%</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, fontFamily: "'Syne',sans-serif", color: "#ff6b6b" }}>0%</div>
                     <div style={{ fontSize: 9, color: "#475569", letterSpacing: ".1em" }}>BURNED</div>
                   </div>
                 </div>
@@ -263,7 +355,7 @@ export default function CTRDashboard() {
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
                   { label: "Total Burned", val: "0 CTR", c: "#ff6b6b" },
-                  { label: "Circulating", val: "1,000.00M CTR", c: "#64ffda" },
+                  { label: "Total Supply", val: "1,000.00M CTR", c: "#64ffda" },
                   { label: "Burn Rate", val: "Starting soon", c: "#f59e0b" },
                   { label: "Est. Deflation", val: "TBD", c: "#7c3aed" },
                 ].map(s => (
@@ -277,23 +369,25 @@ export default function CTRDashboard() {
           </div>
         </div>
 
+        {/* Holdings Table */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>Treasury Holdings</div>
-            <div style={{ fontSize: 11, color: "#475569", fontFamily: "'DM Mono',monospace" }}>{new Date().toLocaleTimeString()}</div>
+            <div style={{ fontSize: 11, color: "#475569", fontFamily: "'DM Mono',monospace" }}>
+              {vaultLoading ? "Loading..." : `Updated ${new Date().toLocaleTimeString()}`}
+            </div>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table className="holdings-table">
               <thead>
                 <tr>
-                  <th>Asset</th><th>Balance</th><th>Price</th><th>USD Value</th><th>Allocation</th><th>24h</th>
+                  <th>Asset</th><th>Balance</th><th>Price</th><th>USD Value</th><th>Allocation</th>
                 </tr>
               </thead>
               <tbody>
-                {vaultData.map(t => {
-                  const val = t.amount * t.price;
-                  const pct = (val / vaultTotal * 100).toFixed(1);
-                  const change = (Math.random() * 8 - 4).toFixed(2);
+                {vaultTokens.map(t => {
+                  const val = t.amount * t.usdPrice;
+                  const pct = vaultTotal > 0 ? (val / vaultTotal * 100).toFixed(1) : "0.0";
                   return (
                     <tr key={t.symbol}>
                       <td>
@@ -305,9 +399,15 @@ export default function CTRDashboard() {
                           </div>
                         </div>
                       </td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#e2e8f0" }}>{fmtCompact(t.amount)}</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#94a3b8" }}>${fmt(t.price, t.price < 1 ? 4 : 2)}</td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#64ffda", fontWeight: 600 }}>${fmtCompact(val)}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#e2e8f0" }}>
+                        {vaultLoading ? "..." : (t.amount < 0.01 ? t.amount.toFixed(4) : fmtCompact(t.amount))}
+                      </td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#94a3b8" }}>
+                        {t.usdPrice > 0 ? `$${fmtPrice(t.usdPrice)}` : "—"}
+                      </td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#64ffda", fontWeight: 600 }}>
+                        {vaultLoading ? "..." : `$${fmtCompact(val)}`}
+                      </td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           <div style={{ width: 60, background: "#1e293b", borderRadius: 99, height: 4, overflow: "hidden" }}>
@@ -315,9 +415,6 @@ export default function CTRDashboard() {
                           </div>
                           <span style={{ fontSize: 11, color: "#64748b" }}>{pct}%</span>
                         </div>
-                      </td>
-                      <td style={{ fontFamily: "'DM Mono',monospace", color: +change > 0 ? "#64ffda" : "#ff6b6b", fontSize: 12 }}>
-                        {+change > 0 ? "+" : ""}{change}%
                       </td>
                     </tr>
                   );
@@ -327,6 +424,7 @@ export default function CTRDashboard() {
           </div>
         </div>
 
+        {/* Buyback Feed */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
@@ -362,6 +460,7 @@ export default function CTRDashboard() {
           </div>
         </div>
 
+        {/* How It Works */}
         <div className="section-card">
           <div style={{ padding: "16px 20px", borderBottom: "1px solid #1e293b" }}>
             <div style={{ fontFamily: "'Syne',sans-serif", fontWeight: 700, fontSize: 16 }}>How CTR Works</div>
