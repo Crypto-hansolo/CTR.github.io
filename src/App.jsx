@@ -9,10 +9,10 @@ const MOCK_VAULT = [
 ];
 
 const MOCK_CTR = {
-  marketCap: 2_190_000,
+  marketCap: 0,
   totalSupply: 1_000_000_000,
-  circulatingSupply: 524_000_000,
-  totalBurned: 47_800_000,
+  circulatingSupply: 1_000_000_000,
+  totalBurned: 0,
 };
 
 const generateBuybackEvents = () => {
@@ -92,11 +92,12 @@ export default function CTRDashboard() {
   const [newIds, setNewIds] = useState(new Set());
   const [livePrice, setLivePrice] = useState(null);
   const [priceChange24h, setPriceChange24h] = useState(null);
+  const [liveMarketCap, setLiveMarketCap] = useState(null);
   const vaultData = MOCK_VAULT;
   const ctr = MOCK_CTR;
   const vaultTotal = vaultData.reduce((s, t) => s + t.amount * t.price, 0);
   const animVault = useCounter(vaultTotal);
-  const burnPct = (ctr.totalBurned / ctr.totalSupply) * 100;
+  const burnPct = 0;
   const pieData = vaultData.map(t => ({ symbol: t.symbol, value: t.amount * t.price, color: t.color }));
 
   useEffect(() => {
@@ -108,8 +109,12 @@ export default function CTRDashboard() {
         const data = await res.json();
         const price = parseFloat(data.pair?.priceUsd);
         const change = parseFloat(data.pair?.priceChange?.h24);
+        const fdv = parseFloat(data.pair?.fdv);
+        const mcap = parseFloat(data.pair?.marketCap);
         if (!isNaN(price)) setLivePrice(price);
         if (!isNaN(change)) setPriceChange24h(change);
+        if (!isNaN(mcap) && mcap > 0) setLiveMarketCap(mcap);
+        else if (!isNaN(fdv) && fdv > 0) setLiveMarketCap(fdv);
       } catch (e) {}
     };
     fetchPrice();
@@ -201,8 +206,8 @@ export default function CTRDashboard() {
           {[
             { label: "CTR Price", value: livePrice !== null ? `$${fmtPrice(livePrice)}` : "...", sub: priceChange24h !== null ? `${changePrefix}${displayChange.toFixed(2)}% (24h)` : "Loading...", c: changeColor },
             { label: "Market Cap", value: `$${fmtCompact(ctr.marketCap)}`, sub: "FDV: $4.18M", c: "#7c3aed" },
-            { label: "Circulating", value: fmtCompact(ctr.circulatingSupply), sub: `of ${fmtCompact(ctr.totalSupply)}`, c: "#f59e0b" },
-            { label: "Total Burned", value: fmtCompact(ctr.totalBurned), sub: `${burnPct.toFixed(2)}% of supply`, c: "#ff6b6b" },
+            { label: "Total Supply", value: fmtCompact(ctr.totalSupply), sub: "Fixed supply", c: "#f59e0b" },
+            { label: "Total Burned", value: "0 CTR", sub: "Burn program starting soon", c: "#ff6b6b" },
             { label: "Vault TVL", value: `$${fmtCompact(animVault)}`, sub: "2.1% this week", c: "#64ffda" },
           ].map(s => (
             <div key={s.label} className="stat-card">
@@ -257,10 +262,10 @@ export default function CTRDashboard() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 {[
-                  { label: "Total Burned", val: fmtCompact(ctr.totalBurned) + " CTR", c: "#ff6b6b" },
-                  { label: "Remaining", val: fmtCompact(ctr.circulatingSupply - ctr.totalBurned) + " CTR", c: "#64ffda" },
-                  { label: "Burn Rate (7d)", val: "~2.1M CTR/week", c: "#f59e0b" },
-                  { label: "Est. Deflation", val: "-4.8% /month", c: "#7c3aed" },
+                  { label: "Total Burned", val: "0 CTR", c: "#ff6b6b" },
+                  { label: "Circulating", val: "1,000.00M CTR", c: "#64ffda" },
+                  { label: "Burn Rate", val: "Starting soon", c: "#f59e0b" },
+                  { label: "Est. Deflation", val: "TBD", c: "#7c3aed" },
                 ].map(s => (
                   <div key={s.label} style={{ background: "#111827", borderRadius: 10, padding: "10px 14px" }}>
                     <div style={{ fontSize: 10, color: "#475569", marginBottom: 4 }}>{s.label}</div>
