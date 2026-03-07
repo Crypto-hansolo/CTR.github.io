@@ -4,12 +4,12 @@ const WALLET = "0x96a6cd06338efe754f200aba9ff07788c16e5f20";
 const CRONOS_RPC = "https://evm.cronos.org";
 
 const TOKENS = [
-  { symbol: "CDCBTC", name: "CDC Bitcoin",  address: "0x2e53c5586e12a99d4CAE366E9Fc5C14fE9c6495d", decimals: 8,  color: "#F7931A", coingecko: "bitcoin" },
-  { symbol: "CDCETH", name: "CDC Ethereum", address: "0x7a7c9db510aB29A2FC362a4c34260BEcB5cE3446", decimals: 18, color: "#627EEA", coingecko: "ethereum" },
-  { symbol: "LCRO",   name: "Liquid CRO",  address: "0x9Fae23A2700FEeCd5b93e43fDBc03c76AA7C08A6", decimals: 18, color: "#4A90D9", coingecko: "liquid-cro" },
-  { symbol: "USDC",   name: "USD Coin",    address: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59", decimals: 6,  color: "#2775CA", coingecko: "usd-coin" },
-  { symbol: "PACK",   name: "Pack Token",  address: "0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804", decimals: 18, color: "#E94040", coingecko: null },
-  { symbol: "CTR",    name: "CTR Token",   address: "0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC", decimals: 18, color: "#64ffda", coingecko: null },
+  { symbol: "CDCBTC", name: "CDC Bitcoin",  address: "0x2e53c5586e12a99d4CAE366E9Fc5C14fE9c6495d", decimals: 8,  color: "#F7931A" },
+  { symbol: "CDCETH", name: "CDC Ethereum", address: "0x7a7c9db510aB29A2FC362a4c34260BEcB5cE3446", decimals: 18, color: "#627EEA" },
+  { symbol: "LCRO",   name: "Liquid CRO",  address: "0x9Fae23A2700FEeCd5b93e43fDBc03c76AA7C08A6", decimals: 18, color: "#4A90D9" },
+  { symbol: "USDC",   name: "USD Coin",    address: "0xc21223249CA28397B4B6541dfFaEcC539BfF0c59", decimals: 6,  color: "#2775CA" },
+  { symbol: "PACK",   name: "Pack Token",  address: "0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804", decimals: 18, color: "#E94040" },
+  { symbol: "CTR",    name: "CTR Token",   address: "0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC", decimals: 18, color: "#64ffda" },
 ];
 
 const MOCK_CTR = {
@@ -131,37 +131,28 @@ export default function CTRDashboard() {
           TOKENS.map(t => getTokenBalance(t.address, WALLET, t.decimals))
         );
 
-        // Get prices from CoinGecko for known tokens
-        const cgIds = TOKENS.map(t => t.coingecko).filter(Boolean).join(",");
-        const cgRes = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${cgIds}&vs_currencies=usd`);
-        const cgData = await cgRes.json();
+        // Get all prices from DexScreener (most accurate for Cronos tokens)
+        const dexRes = await fetch("https://api.dexscreener.com/latest/dex/tokens/0x2e53c5586e12a99d4CAE366E9Fc5C14fE9c6495d,0x7a7c9db510aB29A2FC362a4c34260BEcB5cE3446,0x9Fae23A2700FEeCd5b93e43fDBc03c76AA7C08A6,0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804,0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC");
+        const dexData = await dexRes.json();
 
-        // Get PACK price from DexScreener
-        let packPrice = 0;
-        try {
-          const packRes = await fetch("https://api.dexscreener.com/latest/dex/tokens/0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804");
-          const packData = await packRes.json();
-          packPrice = parseFloat(packData.pairs?.[0]?.priceUsd) || 0;
-        } catch (e) {}
-
-        // Get CTR price (already have it from livePrice state, use fallback)
-        let ctrPrice = 0;
-        try {
-          const ctrRes = await fetch("https://api.dexscreener.com/latest/dex/pairs/cronos/0xf118aa245b0627b4752607620d0048b492a5f4fb");
-          const ctrData = await ctrRes.json();
-          ctrPrice = parseFloat(ctrData.pair?.priceUsd) || 0;
-        } catch (e) {}
+        // Build price map from DexScreener — pick highest liquidity pair per token
+        const priceMap = {};
+        (dexData.pairs || []).forEach(pair => {
+          const addr = pair.baseToken?.address?.toLowerCase();
+          const price = parseFloat(pair.priceUsd);
+          const liq = parseFloat(pair.liquidity?.usd || 0);
+          if (addr && !isNaN(price) && (!priceMap[addr] || liq > priceMap[addr].liq)) {
+            priceMap[addr] = { price, liq };
+          }
+        });
 
         const updated = TOKENS.map((t, i) => {
           let usdPrice = 0;
-          if (t.coingecko && cgData[t.coingecko]) {
-            usdPrice = cgData[t.coingecko].usd;
-          } else if (t.symbol === "PACK") {
-            usdPrice = packPrice;
-          } else if (t.symbol === "CTR") {
-            usdPrice = ctrPrice;
-          } else if (t.symbol === "USDC") {
+          const key = t.address.toLowerCase();
+          if (t.symbol === "USDC") {
             usdPrice = 1.0;
+          } else if (priceMap[key]) {
+            usdPrice = priceMap[key].price;
           }
           return { ...t, amount: balances[i], usdPrice };
         });
