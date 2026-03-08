@@ -48,24 +48,63 @@ function PieChart({ data }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   if (total === 0) return null;
   let angle = -Math.PI / 2;
+  const R = 44; // outer radius
   const slices = data.map(d => {
     const sweep = (d.value / total) * 2 * Math.PI;
-    const x1 = 50 + 44 * Math.cos(angle);
-    const y1 = 50 + 44 * Math.sin(angle);
+    const midAngle = angle + sweep / 2;
+    const x1 = 50 + R * Math.cos(angle);
+    const y1 = 50 + R * Math.sin(angle);
     angle += sweep;
-    const x2 = 50 + 44 * Math.cos(angle);
-    const y2 = 50 + 44 * Math.sin(angle);
+    const x2 = 50 + R * Math.cos(angle);
+    const y2 = 50 + R * Math.sin(angle);
     const lg = sweep > Math.PI ? 1 : 0;
-    return { ...d, d: `M50,50 L${x1},${y1} A44,44 0 ${lg},1 ${x2},${y2} Z` };
+    // Label position — outside the pie
+    const labelR = 56;
+    const lx = 50 + labelR * Math.cos(midAngle);
+    const ly = 50 + labelR * Math.sin(midAngle);
+    const pct = (d.value / total * 100).toFixed(1);
+    return { ...d, d: `M50,50 L${x1},${y1} A${R},${R} 0 ${lg},1 ${x2},${y2} Z`, midAngle, lx, ly, pct, sweep };
   });
   return (
-    <svg viewBox="0 0 100 100" style={{ width: "100%", maxWidth: 180, display: "block", margin: "0 auto" }}>
+    <svg viewBox="-20 -20 140 140" style={{ width: "100%", maxWidth: 220, display: "block", margin: "0 auto" }}>
       {slices.map((s, i) => (
-        <path key={i} d={s.d} fill={s.color} stroke="#06090f" strokeWidth="1.5" />
+        <path key={i} d={s.d} fill={s.color} stroke="#06090f" strokeWidth="1.2" />
       ))}
-      <circle cx="50" cy="50" r="28" fill="#0a0e1a" />
+      <circle cx="50" cy="50" r="28" fill="#111827" />
       <text x="50" y="47" textAnchor="middle" fill="#e2e8f0" fontSize="6" fontFamily="monospace" fontWeight="bold">VAULT</text>
       <text x="50" y="55" textAnchor="middle" fill="#64ffda" fontSize="5" fontFamily="monospace">TVL</text>
+      {slices.map((s, i) => {
+        if (s.sweep < 0.15) return null; // skip tiny slices
+        return (
+          <g key={"label-" + i}>
+            {/* Line from slice to label */}
+            <line
+              x1={50 + 46 * Math.cos(s.midAngle)}
+              y1={50 + 46 * Math.sin(s.midAngle)}
+              x2={50 + 53 * Math.cos(s.midAngle)}
+              y2={50 + 53 * Math.sin(s.midAngle)}
+              stroke={s.color} strokeWidth="0.8" opacity="0.7"
+            />
+            <text
+              x={s.lx}
+              y={s.ly - 2}
+              textAnchor="middle"
+              fill={s.color}
+              fontSize="5"
+              fontFamily="monospace"
+              fontWeight="bold"
+            >{s.symbol}</text>
+            <text
+              x={s.lx}
+              y={s.ly + 4}
+              textAnchor="middle"
+              fill="#94a3b8"
+              fontSize="4.5"
+              fontFamily="monospace"
+            >{s.pct}%</text>
+          </g>
+        );
+      })}
     </svg>
   );
 }
@@ -466,7 +505,7 @@ export default function CTRDashboard() {
                 <>
                   <PieChart data={pieData} />
                   <div style={{ marginTop: 16 }}>
-                    {vaultTokens.map(t => {
+                    {[...vaultTokens].sort((a, b) => (b.amount * b.usdPrice) - (a.amount * a.usdPrice)).map(t => {
                       const val = t.amount * t.usdPrice;
                       const pct = vaultTotal > 0 ? (val / vaultTotal * 100).toFixed(1) : "0.0";
                       return (
