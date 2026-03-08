@@ -173,6 +173,15 @@ export default function CTRDashboard() {
 
 
 
+
+  // Fetch treasury history for chart
+  useEffect(() => {
+    fetch("/treasury-history.json")
+      .then(r => r.json())
+      .then(data => setTreasuryHistory(Array.isArray(data) ? data : []))
+      .catch(() => setTreasuryHistory([]));
+  }, []);
+
   const displayChange = priceChange24h !== null ? priceChange24h : 0;
   const changeColor = displayChange >= 0 ? "#64ffda" : "#ff6b6b";
   const changePrefix = displayChange >= 0 ? "+" : "";
