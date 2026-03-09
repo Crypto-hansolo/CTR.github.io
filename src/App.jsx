@@ -12,6 +12,20 @@ const TOKENS = [
   { symbol: "CTR",    name: "CTR Token",   address: "0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC", decimals: 18, color: "#64ffda" },
 ];
 
+const STAKED_PACK = {
+  symbol: "PACK",
+  name: "Pack Token (Staked)",
+  label: "PACK (Staked)",
+  amount: 148352.944,
+  address: "0x0d0b4a6FC6e7f5635C2FF38dE75AF2e96D6D6804",
+  decimals: 18,
+  color: "#E94040",
+  staked: true,
+  apy: 33,
+  platform: "Wolfswap Vault",
+  stakedLabel: "Wolfswap Vault · 33% APY",
+};
+
 const MOCK_CTR = {
   totalSupply: 1_000_000_000,
   totalBurned: 0,
@@ -296,9 +310,15 @@ export default function CTRDashboard() {
   const [treasuryHistory, setTreasuryHistory] = useState([]);
   const ctr = MOCK_CTR;
 
-  const vaultTotal = vaultTokens.reduce((s, t) => s + t.amount * t.usdPrice, 0);
+  const packToken = vaultTokens.find(t => t.symbol === "PACK");
+  const packUsdPrice = packToken ? packToken.usdPrice : 0;
+  const stakedPackUsdValue = STAKED_PACK.amount * packUsdPrice;
+  const vaultTotal = vaultTokens.reduce((s, t) => s + t.amount * t.usdPrice, 0) + stakedPackUsdValue;
   const animVault = useCounter(vaultTotal);
-  const pieData = vaultTokens.filter(t => t.symbol !== "CTR" && t.amount * t.usdPrice > 0).map(t => ({ symbol: t.symbol, value: t.amount * t.usdPrice, color: t.color }));
+  const pieData = [
+    ...vaultTokens.filter(t => t.symbol !== "CTR" && t.amount * t.usdPrice > 0).map(t => ({ symbol: t.symbol, value: t.amount * t.usdPrice, color: t.color })),
+    ...(stakedPackUsdValue > 0 ? [{ symbol: "PACK*", value: stakedPackUsdValue, color: "#ff4444" }] : []),
+  ];
 
   // Fetch CTR price from DexScreener
   useEffect(() => {
@@ -458,6 +478,45 @@ export default function CTRDashboard() {
         </div>
       </header>
 
+      {/* Buy CTR Banner */}
+      <div style={{ position: "relative", zIndex: 2, borderBottom: "1px solid #1a2f1a" }}>
+        <a
+          href="https://obsidian.finance/?outputCurrency=0xF3672F0cF2E45B28AC4a1D50FD8aC2eB555c21FC"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ textDecoration: "none", display: "block" }}
+        >
+          <div style={{
+            background: "linear-gradient(90deg, #0a1a0a 0%, #0d2e18 40%, #0a1a0a 100%)",
+            padding: "12px 24px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 16,
+            cursor: "pointer",
+            position: "relative",
+            overflow: "hidden",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "linear-gradient(90deg, #0d2010 0%, #123d20 40%, #0d2010 100%)"}
+          onMouseLeave={e => e.currentTarget.style.background = "linear-gradient(90deg, #0a1a0a 0%, #0d2e18 40%, #0a1a0a 100%)"}
+          >
+            <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "1px", background: "linear-gradient(90deg, transparent, #64ffda, transparent)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 18 }}>🏛️</span>
+              <span style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 15, color: "#64ffda", letterSpacing: ".05em" }}>Buy CTR</span>
+            </div>
+            <div style={{ width: "1px", height: 20, background: "#1e3a2a" }} />
+            <span style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'DM Mono',monospace" }}>Trade on Obsidian Finance</span>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ fontSize: 11, color: "#64ffda", fontFamily: "'DM Mono',monospace" }}>obsidian.finance</span>
+              <span style={{ fontSize: 12, color: "#64ffda" }}>↗</span>
+            </div>
+            <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: "1px", background: "linear-gradient(90deg, transparent, #64ffda44, transparent)" }} />
+          </div>
+        </a>
+      </div>
+
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 16px 60px", position: "relative", zIndex: 1 }}>
 
         {/* Stats */}
@@ -517,6 +576,23 @@ export default function CTRDashboard() {
                         </div>
                       );
                     })}
+                    {/* Staked PACK – manual entry (Wolfswap Vault) */}
+                    {stakedPackUsdValue > 0 && (() => {
+                      const val = stakedPackUsdValue;
+                      const pct = vaultTotal > 0 ? (val / vaultTotal * 100).toFixed(1) : "0.0";
+                      return (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, background: "#1a1030", borderRadius: 8, padding: "6px 8px", border: "1px solid #3d1a6e55" }}>
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: STAKED_PACK.color, flexShrink: 0 }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: 13, color: "#cbd5e1" }}>PACK <span style={{ fontSize: 10, color: "#a78bfa", background: "#3d1a6e55", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>Staked</span></div>
+                            <div style={{ fontSize: 10, color: "#6b4fa0", fontFamily: "'DM Mono',monospace" }}>🔒 {STAKED_PACK.stakedLabel}</div>
+                          </div>
+                          <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: "'DM Mono',monospace" }}>{fmtCompact(STAKED_PACK.amount)}</div>
+                          <div style={{ fontSize: 12, color: "#64ffda", fontFamily: "'DM Mono',monospace", width: 70, textAlign: "right" }}>${fmtCompact(val)}</div>
+                          <div style={{ fontSize: 11, color: "#475569", width: 36, textAlign: "right" }}>{pct}%</div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </>
               )}
@@ -610,6 +686,36 @@ export default function CTRDashboard() {
                     </tr>
                   );
                 })}
+                {/* Staked PACK row */}
+                {stakedPackUsdValue > 0 && (() => {
+                  const pct = vaultTotal > 0 ? (stakedPackUsdValue / vaultTotal * 100).toFixed(1) : "0.0";
+                  return (
+                    <tr style={{ background: "#1a1030" }}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#E9404022", border: "2px solid #E9404055", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 700, color: "#E94040", flexShrink: 0 }}>P</div>
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 13 }}>Pack Token <span style={{ fontSize: 10, color: "#a78bfa", background: "#3d1a6e55", borderRadius: 4, padding: "1px 5px", marginLeft: 4 }}>Staked</span></div>
+                            <div style={{ fontSize: 10, color: "#6b4fa0" }}>🔒 {STAKED_PACK.stakedLabel}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#e2e8f0" }}>{fmtCompact(STAKED_PACK.amount)}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#94a3b8" }}>{packUsdPrice > 0 ? `$${fmtPrice(packUsdPrice)}` : "—"}</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", color: "#64ffda", fontWeight: 600 }}>${fmtCompact(stakedPackUsdValue)}</td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <div style={{ width: 60, background: "#1e293b", borderRadius: 99, height: 4, overflow: "hidden" }}>
+                            <div style={{ width: `${pct}%`, height: "100%", background: "#E94040", borderRadius: 99 }} />
+                          </div>
+                          <span style={{ fontSize: 11, color: "#64748b" }}>{pct}%</span>
+                        </div>
+                      </td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#a78bfa" }}>33% APY</td>
+                      <td style={{ fontFamily: "'DM Mono',monospace", fontSize: 12, color: "#475569" }}>—</td>
+                    </tr>
+                  );
+                })()}
               </tbody>
             </table>
           </div>
